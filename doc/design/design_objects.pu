@@ -1,0 +1,171 @@
+@startuml
+skinparam classAttributeIconSize 0
+
+package "Environment Layer (RL Interface)" {
+    class "gymnasium.Env" as GymEnv <<External>> {
+        + step(action)
+        + reset()
+        + render()
+    }
+
+    class TurnTakingEnv {
+        - engine: BasePhysicsEngine
+        - logger: ExperimentLogger
+        - observation_space: Space
+        - action_space: Space
+        + __init__(engine_type: String, db_path: String)
+        + step(action: ndarray): Tuple
+        + reset(seed: int): Tuple
+        + render()
+        - _calculate_reward(state: ndarray): float
+        - _check_turn_taking(state: ndarray): bool
+    }
+}
+
+package "Physics Engine Layer (Strategy Pattern)" {
+    abstract class BasePhysicsEngine {
+        + step(action: ndarray)
+        + get_state(): ndarray
+        + reset()
+    }
+
+    class RungeKuttaEngine {
+        - M: float
+        - I: float
+        - D1: float
+        - D2: float
+        - dt: float
+        + step(action: ndarray)
+        + get_state(): ndarray
+        + reset()
+        - _rk4_integration()
+    }
+
+    class MujocoEngine {
+        - model: MjModel
+        - data: MjData
+        + step(action: ndarray)
+        + get_state(): ndarray
+        + reset()
+    }
+}
+
+package "Data Logging Layer (DuckDB)" {
+    class ExperimentLogger {
+        - db_connection: DuckDBPyConnection
+        - db_path: String
+        + __init__(db_path: String)
+        + setup_tables()
+        + log_step(episode: int, step: int, state: ndarray, action: ndarray, reward: float)
+        + log_episode(episode: int, total_reward: float, turn_taking_rate: float)
+        + close()
+    }
+}
+
+package "Visualization Layer (Streamlit)" {
+    class StreamlitDashboard <<Concept>> {
+        + fetch_data(query: String): DataFrame
+        + plot_learning_curve()
+        + plot_spatial_trajectories()
+        + show_metrics()
+    }
+}
+
+package "Training & Evaluation Layer (Orchestrator)" {
+    class Trainer {
+        - env: TurnTakingEnv
+        - agent: BaseAgent
+        - logger: ExperimentLogger
+        - total_timesteps: int
+        + __init__(env, agent, logger)
+        + train()
+        - _collect_rollouts()
+        - _update_model()
+    }
+
+    class Evaluator {
+        - env: TurnTakingEnv
+        - agent: BaseAgent
+        - logger: ExperimentLogger
+        + __init__(env, agent, logger)
+        + evaluate(num_episodes: int): Dict
+        + render_trajectories()
+    }
+}
+
+package "Agent & Model Layer (Deep RL)" {
+    abstract class BaseAgent {
+        + act(state: ndarray, deterministic: bool): ndarray
+        + update(batch_data: Dict): Dict
+        + save(path: String)
+        + load(path: String)
+    }
+
+    class ActorCriticAgent {
+        - actor_network: NeuralNetwork
+        - critic_network: NeuralNetwork
+        - optimizer: Optimizer
+        - gamma: float
+        + act(state: ndarray, deterministic: bool): ndarray
+        + update(batch_data: Dict): Dict
+        - _compute_loss(): Tuple
+    }
+
+    class ReplayBuffer {
+        - buffer: List
+        - capacity: int
+        + push(state, action, reward, next_state, done)
+        + sample(batch_size: int): Dict
+        + clear()
+    }
+}
+
+' Relationships
+GymEnv <|-- TurnTakingEnv
+
+TurnTakingEnv o--> "1" BasePhysicsEngine : Strategy
+TurnTakingEnv o--> "1" ExperimentLogger : Logging
+
+BasePhysicsEngine <|-- RungeKuttaEngine
+BasePhysicsEngine <|-- MujocoEngine
+
+ExperimentLogger <-- StreamlitDashboard : Read via DuckDB File
+
+' Relationships for Training & Evaluation
+Trainer o--> "1" TurnTakingEnv : Interacts
+Trainer o--> "1" BaseAgent : Trains
+Trainer o--> "1" ExperimentLogger : Logs data
+
+Evaluator o--> "1" TurnTakingEnv : Tests
+Evaluator o--> "1" BaseAgent : Uses policy
+Evaluator o--> "1" ExperimentLogger : Logs metrics
+
+' Relationships for Agent & Model
+BaseAgent <|-- ActorCriticAgent
+ActorCriticAgent o-> "1" ReplayBuffer : Uses (if off-policy)
+
+note right of BasePhysicsEngine
+  RL環境側は物理エンジンの
+  内部実装を気にせず、
+  共通のAPIで操作する
+end note
+
+note bottom of RungeKuttaEngine
+  論文の数式(1), (2)に基づく
+  4次ルンゲクッタ法を用いた
+  独自の積分器
+end note
+
+note right of Trainer
+  学習ループを管理。
+  環境からデータを集め、
+  Agentに更新を指示する。
+end note
+
+note bottom of ActorCriticAgent
+  JAX/FlaxやPyTorchで実装。
+  PPOやSACなどのアルゴリズムを
+  ここにカプセル化する。
+end note
+
+@enduml
